@@ -2,7 +2,6 @@ package golambda
 
 import (
 	"fmt"
-	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
@@ -27,24 +26,23 @@ type Response struct {
 	Items []ResponseItem
 }
 
-func main() {
-	lambda.Start(HandleRequest)
-}
-
 func HandleRequest(name MyEvent) (Response, error) {
 	var items []ResponseItem
 	var autoScalingGroupNames []*string
 	client := &http.Client{}
-	for _, value := range strings.Split(os.Getenv("asgList"), ", ") {
+	for _, value := range strings.Split(os.Getenv("ASG_LIST"), ", ") {
 		autoScalingGroupNames = append(autoScalingGroupNames, aws.String(value))
 	}
 	instances := getInstancesPublicIps(os.Getenv("REGION"), autoScalingGroupNames)
 	wg := new(sync.WaitGroup)
+
 	for _, instance := range instances {
 		wg.Add(1)
-		go func(ip string) {
+		go func(ip string, group * sync.WaitGroup) {
+			defer group.Done()
 			request, err := http.NewRequest("DELETE", fmt.Sprintf("http://%s:80/.*%s.*", ip, name.PostId), nil)
 			if err != nil {
+				fmt.Println(err)
 				return
 			}
 			resp, err := client.Do(request)
@@ -54,12 +52,12 @@ func HandleRequest(name MyEvent) (Response, error) {
 			}
 			defer resp.Body.Close()
 			items = append(items, ResponseItem{PostId: name.PostId, ResponseStatus: resp.StatusCode, Ip: instance})
-		}(instance)
+		}(instance, wg)
 
 	}
 	wg.Wait()
 
-	return Response{Items:items}, nil
+	return Response{Items: items}, nil
 }
 
 func getInstancesPublicIps(awsRegion string, autoScalingGroupNames []*string) []string {
@@ -73,17 +71,11 @@ func getInstancesPublicIps(awsRegion string, autoScalingGroupNames []*string) []
 	if err != nil {
 		panic(err)
 	}
-	wg := new(sync.WaitGroup)
 	for _, autoScalingGroup := range result.AutoScalingGroups {
 		for _, instance := range autoScalingGroup.Instances {
-			wg.Add(1)
-			go func(group *sync.WaitGroup) {
-				defer group.Done()
-				instanceIds = append(instanceIds, instance.InstanceId)
-			}(wg)
+			instanceIds = append(instanceIds, instance.InstanceId)
 		}
 	}
-	wg.Wait()
 
 	instances, err := ec2Client.DescribeInstances(&ec2.DescribeInstancesInput{
 		InstanceIds: instanceIds,
@@ -91,16 +83,12 @@ func getInstancesPublicIps(awsRegion string, autoScalingGroupNames []*string) []
 	if err != nil {
 		panic(err)
 	}
-	wgIp := new(sync.WaitGroup)
 MainLoop:
 	for {
 		for _, reservation := range instances.Reservations {
 			for _, instanceReservation := range reservation.Instances {
-				wgIp.Add(1)
-				go func(group *sync.WaitGroup) {
-					defer group.Done()
-					instanceIps = append(instanceIps, *instanceReservation.PublicIpAddress)
-				}(wgIp)
+				instanceIps = append(instanceIps, *instanceReservation.PublicIpAddress)
+
 			}
 		}
 		if instances.NextToken == nil {
@@ -114,7 +102,5 @@ MainLoop:
 			panic(err)
 		}
 	}
-
-	wgIp.Wait()
 	return instanceIps
 }

@@ -1,11 +1,10 @@
 package main
 
 import (
+	"github.com/YuriiChmil/golambda/golambda"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/YuriiChmil/golambda"
 )
 
-
 func main() {
-	lambda.Start(golambda.HandleRequest())
+	lambda.Start(golambda.HandleRequest)
 }
