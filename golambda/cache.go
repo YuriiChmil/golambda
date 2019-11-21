@@ -27,6 +27,9 @@ type Response struct {
 }
 
 func HandleRequest(name MyEvent) (Response, error) {
+	if name.PostId == "" {
+		panic("post id is empty")
+	}
 	var items []ResponseItem
 	var autoScalingGroupNames []*string
 	client := &http.Client{}
@@ -38,20 +41,18 @@ func HandleRequest(name MyEvent) (Response, error) {
 
 	for _, instance := range instances {
 		wg.Add(1)
-		go func(ip string, group * sync.WaitGroup) {
+		go func(ip string, group *sync.WaitGroup) {
 			defer group.Done()
 			request, err := http.NewRequest("DELETE", fmt.Sprintf("http://%s:80/.*%s.*", ip, name.PostId), nil)
 			if err != nil {
-				fmt.Println(err)
-				return
+				panic(err)
 			}
 			resp, err := client.Do(request)
 			if err != nil {
-				fmt.Println(err)
-				return
+				panic(err)
 			}
 			defer resp.Body.Close()
-			items = append(items, ResponseItem{PostId: name.PostId, ResponseStatus: resp.StatusCode, Ip: instance})
+			items = append(items, ResponseItem{PostId: name.PostId, ResponseStatus: resp.StatusCode, Ip: ip})
 		}(instance, wg)
 
 	}
@@ -87,7 +88,7 @@ MainLoop:
 	for {
 		for _, reservation := range instances.Reservations {
 			for _, instanceReservation := range reservation.Instances {
-				instanceIps = append(instanceIps, *instanceReservation.PublicIpAddress)
+				instanceIps = append(instanceIps, *instanceReservation.PrivateIpAddress)
 
 			}
 		}
